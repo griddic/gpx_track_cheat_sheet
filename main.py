@@ -1,3 +1,4 @@
+import math
 from operator import itemgetter
 import os
 from pathlib import Path
@@ -8,7 +9,7 @@ from gpxpy.geo import length_3d
 import numpy as np
 import matplotlib.pyplot as plt
 
-
+plt.rcParams["figure.autolayout"] = True
 
 class Point:
     def __init__(self, distance, elevation) -> None:
@@ -21,8 +22,42 @@ class Point:
 def get_file(file_path):
     gpx = gpxpy.parse(open(file_path))
     elevation_data = srtm.get_data()
-    elevation_data.add_elevations(gpx, smooth=True)
+    elevation_data.add_elevations(
+        gpx, 
+        smooth=True,
+    )
     return gpx
+
+def calc_total_asc_desc_angl(track):
+    asc = 0
+    desc = 0
+    max_angl = 0
+    max_angl_index = 0
+    prev = 0
+    for i in range(1, len(track)):
+        if (track[i].distance - track[prev].distance) > (50 / 1000):
+            if (up := track[i].elevation - track[prev].elevation) > 0:
+                asc += up 
+            else:
+                desc -= up
+            prev = i
+
+        for l in range(i, 0, -1):
+            if track[i].distance - track[l].distance > 0.1:
+                break
+        if track[i].distance - track[l].distance < 0.1:
+            continue
+            
+        for r in range(i, len(track)):
+            if track[r].distance - track[i].distance > 0.1:
+                break
+        if track[r].distance - track[i].distance < 0.1:
+            continue
+        angl = (track[r].elevation - track[l].elevation) / ((track[r].distance - track[l].distance) * 1000)
+        if angl > max_angl:
+            max_angl = angl
+            max_angl_index = i
+    return int(asc), int(desc), (max_angl_index, int(max_angl * 100))
 
 def process_file(file_path):
     gpx = get_file(file_path)
@@ -91,15 +126,20 @@ def process_file(file_path):
                 index = i
         del i
         assert index is not None
-        waypoints_with_trackpoints.append((p, index, track[index].distance))
+        waypoints_with_trackpoints.append((p.name, index, track[index].distance))
+    acs, desc, (mangli, mangl) = calc_total_asc_desc_angl(track)
+    waypoints_with_trackpoints.append((f'набор: {acs}', 0, 0))
+    waypoints_with_trackpoints.append((f'сброс: {desc}', 0, 0))
+    waypoints_with_trackpoints.append((f'макс угол: {mangl}', mangli, track[mangli].distance))
+                                      
     waypoints_with_trackpoints = sorted(waypoints_with_trackpoints, key=itemgetter(2))
 
         
-    for p, index, _ in waypoints_with_trackpoints:
+    for name, index, _ in waypoints_with_trackpoints:
         annotation_y = y_to_annotane(index)
         prev_annotations_y.append(annotation_y)
         plt.annotate(
-            p.name, 
+            name, 
             xy=(track[index].distance, track[index].elevation), 
             xytext=(track[index].distance, annotation_y),
             arrowprops=dict(
@@ -118,6 +158,7 @@ def process_file(file_path):
     # plt.xlabel([t.distance / 1000 for t in track])
     plt.xticks(np.arange(0, track[-1].distance, 5))
     plt.title(Path(file_path).name)
+    # plt.subplots_adjust(wspace=0, hspace=0)
     plt.savefig(file_path + '.jpg')
 
 
